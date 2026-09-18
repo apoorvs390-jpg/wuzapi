@@ -1614,9 +1614,9 @@ func compressVideoIfNeeded(filedata []byte) ([]byte, error) {
 	defer os.Remove(outPath)
 
 	cmd := exec.Command("ffmpeg", "-y", "-i", inFile.Name(),
-		"-vf", "scale='min(854,iw)':-2",
-		"-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
-		"-c:a", "aac", "-b:a", "96k",
+		"-vf", "scale='min(640,iw)':-2",
+		"-c:v", "libx264", "-preset", "veryfast", "-crf", "32",
+		"-c:a", "aac", "-b:a", "64k",
 		outPath)
 	if out, cmdErr := cmd.CombinedOutput(); cmdErr != nil {
 		return nil, fmt.Errorf("ffmpeg compression failed: %w (%s)", cmdErr, string(out))
