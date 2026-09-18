@@ -19,6 +19,13 @@ RUN go mod download
 
 COPY . .
 ENV CGO_ENABLED=1
+
+# Pull the latest whatsmeow library so WhatsApp doesn't reject the
+# connection as an outdated client, then rebuild go.sum to match.
+ENV GOFLAGS=-mod=mod
+RUN go get -u go.mau.fi/whatsmeow@latest
+RUN go mod tidy
+
 RUN go build -o wuzapi
 
 FROM debian:bookworm-slim
