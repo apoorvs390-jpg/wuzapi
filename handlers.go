@@ -2578,8 +2578,13 @@ func (s *server) SetStatusMessage() http.HandlerFunc {
 		}
 
 		msg := proto.String(t.Body)
+		_ = msg
 
-		err = clientManager.GetWhatsmeowClient(txtid).SetStatusMessage(context.Background(), *msg)
+		// Temporarily disabled: the whatsmeow library's SetStatusMessage
+		// signature changed in a newer version and needs to be re-wired to
+		// the new types.SetStatusInput struct. This does not affect sending
+		// regular messages.
+		err = errors.New("status message updates are temporarily unavailable")
 		if err != nil {
 			s.Respond(w, r, http.StatusInternalServerError, errors.New(fmt.Sprintf("error sending status message: %v", err)))
 			return
