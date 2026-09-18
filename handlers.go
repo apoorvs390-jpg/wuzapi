@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -1582,6 +1583,53 @@ func (s *server) SendSticker() http.HandlerFunc {
 }
 
 // Sends Video message
+// maxVideoUploadBytes is WhatsApp's practical video size limit. Raw
+// phone-recorded videos are often much larger than this — the official
+// WhatsApp app silently compresses them before upload, which this API path
+// does not do on its own, so oversized videos otherwise upload unreliably
+// or get silently dropped by WhatsApp's servers.
+const maxVideoUploadBytes = 15 * 1024 * 1024
+
+// compressVideoIfNeeded shrinks a video with ffmpeg (bundled in the Docker
+// image) if it's larger than maxVideoUploadBytes. This is a best-effort
+// compression (scaled resolution + moderate bitrate), not an exact target
+// size, but reliably brings typical phone-recorded clips under the limit.
+func compressVideoIfNeeded(filedata []byte) ([]byte, error) {
+	if len(filedata) <= maxVideoUploadBytes {
+		return filedata, nil
+	}
+
+	inFile, err := os.CreateTemp("", "wuzapi-in-*.mp4")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp input file: %w", err)
+	}
+	defer os.Remove(inFile.Name())
+	if _, err := inFile.Write(filedata); err != nil {
+		inFile.Close()
+		return nil, fmt.Errorf("failed to write temp input file: %w", err)
+	}
+	inFile.Close()
+
+	outPath := inFile.Name() + "-out.mp4"
+	defer os.Remove(outPath)
+
+	cmd := exec.Command("ffmpeg", "-y", "-i", inFile.Name(),
+		"-vf", "scale='min(854,iw)':-2",
+		"-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
+		"-c:a", "aac", "-b:a", "96k",
+		outPath)
+	if out, cmdErr := cmd.CombinedOutput(); cmdErr != nil {
+		return nil, fmt.Errorf("ffmpeg compression failed: %w (%s)", cmdErr, string(out))
+	}
+
+	compressed, err := os.ReadFile(outPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read compressed output: %w", err)
+	}
+	log.Info().Int("original_bytes", len(filedata)).Int("compressed_bytes", len(compressed)).Msg("Compressed oversized video before upload")
+	return compressed, nil
+}
+
 func (s *server) SendVideo() http.HandlerFunc {
 
 	type imageStruct struct {
@@ -1670,6 +1718,12 @@ func (s *server) SendVideo() http.HandlerFunc {
 		} else {
 			s.Respond(w, r, http.StatusBadRequest, errors.New("data should start with \"data:mime/type;base64,\""))
 			return
+		}
+
+		if compressed, cerr := compressVideoIfNeeded(filedata); cerr != nil {
+			log.Warn().Err(cerr).Msg("Video compression failed; sending original file as-is")
+		} else {
+			filedata = compressed
 		}
 
 		uploaded, err = clientManager.GetWhatsmeowClient(txtid).Upload(context.Background(), filedata, whatsmeow.MediaVideo)
