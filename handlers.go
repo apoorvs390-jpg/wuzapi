@@ -702,6 +702,7 @@ func (s *server) Logout() http.HandlerFunc {
 func (s *server) ForceReset() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		txtid := r.Context().Value("userinfo").(Values).Get("Id")
+		token := r.Context().Value("userinfo").(Values).Get("Token")
 		jidStr := r.Context().Value("userinfo").(Values).Get("Jid")
 
 		// Stop and remove any in-memory client for this user first, so a
@@ -727,6 +728,11 @@ func (s *server) ForceReset() http.HandlerFunc {
 			s.Respond(w, r, http.StatusInternalServerError, errors.New("failed to clear stored pairing: "+err.Error()))
 			return
 		}
+
+		// The in-memory userinfo cache still holds the old jid too — without
+		// clearing this, the very next request rebuilds state from the stale
+		// cached value instead of the now-cleared database row.
+		userinfocache.Delete(token)
 
 		log.Info().Str("userid", txtid).Str("jid", jidStr).Msg("Force reset: cleared stale device pairing")
 
