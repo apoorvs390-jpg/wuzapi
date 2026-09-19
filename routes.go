@@ -93,6 +93,7 @@ s.router.Use(func(next http.Handler) http.Handler {
 	s.router.Handle("/session/connect", c.Then(s.Connect())).Methods("POST")
 	s.router.Handle("/session/disconnect", c.Then(s.Disconnect())).Methods("POST")
 	s.router.Handle("/session/logout", c.Then(s.Logout())).Methods("POST")
+	s.router.Handle("/session/forcereset", c.Then(s.ForceReset())).Methods("POST")
 	s.router.Handle("/session/status", c.Then(s.GetStatus())).Methods("GET")
 	s.router.Handle("/session/qr", c.Then(s.GetQR())).Methods("GET")
 	s.router.Handle("/session/pairphone", c.Then(s.PairPhone())).Methods("POST")
