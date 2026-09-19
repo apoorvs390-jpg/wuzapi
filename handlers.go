@@ -691,6 +691,55 @@ func (s *server) Logout() http.HandlerFunc {
 	}
 }
 
+// ForceReset clears a stale device pairing directly from storage, without
+// requiring an active WhatsApp connection first. Logout() above needs the
+// client to already be connected and logged in to ask WhatsApp's servers to
+// unlink the device — but if the connection itself is stuck (e.g. a bad
+// proxy or a blocked network), that's a catch-22: no new QR is ever offered
+// because the server still has old pairing info, yet Logout can't run to
+// clear it because it isn't connected. This endpoint clears the local
+// device record so a fresh QR pairing can start regardless.
+func (s *server) ForceReset() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		txtid := r.Context().Value("userinfo").(Values).Get("Id")
+		jidStr := r.Context().Value("userinfo").(Values).Get("Jid")
+
+		// Stop and remove any in-memory client for this user first, so a
+		// stuck reconnect loop doesn't keep re-writing state while we clear it.
+		if clientManager.GetWhatsmeowClient(txtid) != nil {
+			clientManager.GetWhatsmeowClient(txtid).Disconnect()
+			clientManager.DeleteWhatsmeowClient(txtid)
+		}
+		signalKill(txtid)
+
+		if jidStr != "" {
+			jid, ok := parseJID(jidStr)
+			if ok {
+				if device, derr := container.GetDevice(context.Background(), jid); derr == nil && device != nil {
+					if derr := device.Delete(context.Background()); derr != nil {
+						log.Warn().Err(derr).Str("jid", jidStr).Msg("Failed to delete device store during force reset")
+					}
+				}
+			}
+		}
+
+		if _, err := s.db.Exec("UPDATE users SET jid='', connected=0, qrcode='' WHERE id=$1", txtid); err != nil {
+			s.Respond(w, r, http.StatusInternalServerError, errors.New("failed to clear stored pairing: "+err.Error()))
+			return
+		}
+
+		log.Info().Str("userid", txtid).Str("jid", jidStr).Msg("Force reset: cleared stale device pairing")
+
+		response := map[string]interface{}{"Details": "Pairing cleared. Get a new QR code to link a phone."}
+		responseJson, err := json.Marshal(response)
+		if err != nil {
+			s.Respond(w, r, http.StatusInternalServerError, err)
+		} else {
+			s.Respond(w, r, http.StatusOK, string(responseJson))
+		}
+	}
+}
+
 // Pair by Phone. Retrieves the code to pair by phone number instead of QR
 func (s *server) PairPhone() http.HandlerFunc {
 
